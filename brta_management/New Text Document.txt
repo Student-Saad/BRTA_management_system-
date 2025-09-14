@@ -1,0 +1,217 @@
+
+-- Create database if not exists
+CREATE DATABASE IF NOT EXISTS brta_management;
+USE brta_management;
+
+-- Vehicles table - Main vehicle registration records
+CREATE TABLE IF NOT EXISTS vehicles (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    registration_number VARCHAR(50) UNIQUE NOT NULL,
+    chassis_number VARCHAR(100) UNIQUE NOT NULL,
+    engine_number VARCHAR(100) UNIQUE NOT NULL,
+    vehicle_type ENUM('car', 'motorcycle', 'truck', 'bus', 'microbus', 'pickup') NOT NULL,
+    brand VARCHAR(100) NOT NULL,
+    model VARCHAR(100) NOT NULL,
+    year_of_manufacture YEAR NOT NULL,
+    color VARCHAR(50) NOT NULL,
+    owner_name VARCHAR(200) NOT NULL,
+    owner_nid VARCHAR(20) NOT NULL,
+    owner_address TEXT NOT NULL,
+    owner_phone VARCHAR(20) NOT NULL,
+    registration_date DATE NOT NULL,
+    expiry_date DATE NOT NULL,
+    status ENUM('active', 'suspended', 'expired') DEFAULT 'active',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    INDEX idx_registration_number (registration_number),
+    INDEX idx_chassis_number (chassis_number),
+    INDEX idx_owner_nid (owner_nid),
+    INDEX idx_status (status),
+    INDEX idx_vehicle_type (vehicle_type)
+);
+
+-- Drivers table - Driver license and personal information
+CREATE TABLE IF NOT EXISTS drivers (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    license_number VARCHAR(50) UNIQUE NOT NULL,
+    full_name VARCHAR(200) NOT NULL,
+    father_name VARCHAR(200) NOT NULL,
+    mother_name VARCHAR(200) NOT NULL,
+    nid_number VARCHAR(20) UNIQUE NOT NULL,
+    date_of_birth DATE NOT NULL,
+    blood_group ENUM('A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-') NOT NULL,
+    address TEXT NOT NULL,
+    phone VARCHAR(20) NOT NULL,
+    email VARCHAR(100),
+    license_type ENUM('professional', 'non-professional') NOT NULL,
+    vehicle_class VARCHAR(50) NOT NULL,
+    issue_date DATE NOT NULL,
+    expiry_date DATE NOT NULL,
+    status ENUM('active', 'suspended', 'expired') DEFAULT 'active',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    INDEX idx_license_number (license_number),
+    INDEX idx_nid_number (nid_number),
+    INDEX idx_full_name (full_name),
+    INDEX idx_status (status),
+    INDEX idx_license_type (license_type),
+    INDEX idx_expiry_date (expiry_date)
+);
+
+-- License categories - Different types of licenses and their fees
+CREATE TABLE IF NOT EXISTS license_categories (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    category_code VARCHAR(10) UNIQUE NOT NULL,
+    category_name VARCHAR(100) NOT NULL,
+    description TEXT,
+    fee DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    validity_years INT NOT NULL DEFAULT 5,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    INDEX idx_category_code (category_code)
+);
+
+-- Registration history - Track vehicle registration changes and transfers
+CREATE TABLE IF NOT EXISTS registrations (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    vehicle_id INT,
+    registration_type ENUM('new', 'renewal', 'transfer', 'duplicate') NOT NULL,
+    previous_owner VARCHAR(200),
+    new_owner VARCHAR(200) NOT NULL,
+    previous_owner_nid VARCHAR(20),
+    new_owner_nid VARCHAR(20) NOT NULL,
+    registration_date DATE NOT NULL,
+    expiry_date DATE NOT NULL,
+    fee_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    status ENUM('pending', 'approved', 'rejected', 'cancelled') DEFAULT 'pending',
+    remarks TEXT,
+    processed_by VARCHAR(100),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE CASCADE,
+    INDEX idx_vehicle_id (vehicle_id),
+    INDEX idx_registration_type (registration_type),
+    INDEX idx_status (status),
+    INDEX idx_registration_date (registration_date)
+);
+
+-- Insert default license categories
+INSERT INTO license_categories (category_code, category_name, description, fee, validity_years) VALUES
+('A', 'Motorcycle (50cc)', 'Motorcycle up to 50cc engine capacity', 500.00, 5),
+('B', 'Motorcycle (Above 50cc)', 'Motorcycle above 50cc engine capacity', 750.00, 5),
+('C', 'Light Vehicle', 'Car and light transport vehicles', 1000.00, 5),
+('D', 'Medium Vehicle', 'Medium transport and commercial vehicles', 1500.00, 5),
+('E', 'Heavy Vehicle', 'Heavy transport and goods vehicles', 2000.00, 5),
+('F', 'Bus/Passenger', 'Passenger transport and bus driving', 2500.00, 5),
+('G', 'Professional', 'Professional driving license', 3000.00, 5)
+ON DUPLICATE KEY UPDATE
+category_name = VALUES(category_name),
+description = VALUES(description),
+fee = VALUES(fee),
+validity_years = VALUES(validity_years);
+
+-- Create views for easier data access
+CREATE OR REPLACE VIEW vehicle_summary AS
+SELECT 
+    v.id,
+    v.registration_number,
+    v.vehicle_type,
+    CONCAT(v.brand, ' ', v.model) as vehicle_name,
+    v.year_of_manufacture,
+    v.color,
+    v.owner_name,
+    v.owner_phone,
+    v.status,
+    v.expiry_date,
+    CASE 
+        WHEN v.expiry_date < CURDATE() THEN 'Expired'
+        WHEN v.expiry_date <= DATE_ADD(CURDATE(), INTERVAL 30 DAY) THEN 'Expiring Soon'
+        ELSE 'Valid'
+    END as expiry_status,
+    v.created_at
+FROM vehicles v
+ORDER BY v.created_at DESC;
+
+CREATE OR REPLACE VIEW driver_summary AS
+SELECT 
+    d.id,
+    d.license_number,
+    d.full_name,
+    d.license_type,
+    d.vehicle_class,
+    d.phone,
+    d.email,
+    d.status,
+    d.issue_date,
+    d.expiry_date,
+    CASE 
+        WHEN d.expiry_date < CURDATE() THEN 'Expired'
+        WHEN d.expiry_date <= DATE_ADD(CURDATE(), INTERVAL 30 DAY) THEN 'Expiring Soon'
+        ELSE 'Valid'
+    END as expiry_status,
+    TIMESTAMPDIFF(YEAR, d.date_of_birth, CURDATE()) as age,
+    d.created_at
+FROM drivers d
+ORDER BY d.created_at DESC;
+
+-- Create stored procedures for common operations
+DELIMITER //
+
+CREATE PROCEDURE IF NOT EXISTS GetVehiclesByStatus(IN vehicle_status VARCHAR(20))
+BEGIN
+    SELECT * FROM vehicle_summary 
+    WHERE status = vehicle_status 
+    ORDER BY registration_number;
+END //
+
+CREATE PROCEDURE IF NOT EXISTS GetDriversByStatus(IN driver_status VARCHAR(20))
+BEGIN
+    SELECT * FROM driver_summary 
+    WHERE status = driver_status 
+    ORDER BY license_number;
+END //
+
+CREATE PROCEDURE IF NOT EXISTS GetExpiringLicenses(IN days_ahead INT)
+BEGIN
+    SELECT * FROM driver_summary 
+    WHERE expiry_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL days_ahead DAY)
+    AND status = 'active'
+    ORDER BY expiry_date;
+END //
+
+CREATE PROCEDURE IF NOT EXISTS GetExpiringRegistrations(IN days_ahead INT)
+BEGIN
+    SELECT * FROM vehicle_summary 
+    WHERE expiry_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL days_ahead DAY)
+    AND status = 'active'
+    ORDER BY expiry_date;
+END //
+
+DELIMITER ;
+
+-- Create triggers for automatic status updates
+DELIMITER //
+
+CREATE TRIGGER IF NOT EXISTS update_vehicle_status_on_expiry
+BEFORE UPDATE ON vehicles
+FOR EACH ROW
+BEGIN
+    IF NEW.expiry_date < CURDATE() AND NEW.status = 'active' THEN
+        SET NEW.status = 'expired';
+    END IF;
+END //
+
+CREATE TRIGGER IF NOT EXISTS update_driver_status_on_expiry
+BEFORE UPDATE ON drivers
+FOR EACH ROW
+BEGIN
+    IF NEW.expiry_date < CURDATE() AND NEW.status = 'active' THEN
+        SET NEW.status = 'expired';
+    END IF;
+END //
+
+DELIMITER ;
